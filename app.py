@@ -1,4 +1,5 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
+from flask_cors import CORS  # Import CORS
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -9,97 +10,105 @@ import datetime
 import os
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for Frontend connection
 
-# Change yahan kar sakte ho
-TICKER = 'BTC-USD'      # BTC ke liye BTC-USD, Gold ke liye GC=F, stock ke liye AAPL ya RELIANCE.NS
-PERIOD = '2y'           # 2 saal ka data – fast aur achha
+# Default setting (Agar kuch na mile)
+DEFAULT_PERIOD = '2y'
+
+# --- ROUTE FOR FRONTEND ---
+@app.route('/scan', methods=['POST'])
+def scan():
+    # Frontend se symbol mango
+    data = request.json
+    ticker = data.get('symbol', 'BTC-USD') # Agar frontend kuch na bheje to BTC lo
+    
+    result = get_prediction(ticker)
+    
+    if "error" in result:
+        return jsonify({"success": False, "error": result['error']})
+    else:
+        return jsonify({"success": True, "data": result})
 
 @app.route('/')
 def home():
-    result = get_prediction()
-    if "error" in result:
-        return f"<h1>Error</h1><p>{result['error']}</p>"
-    
-    html = f"""
-    <html>
-    <head><title>Prediction - {TICKER}</title>
-    <style>
-        body {{font-family:Arial; text-align:center; padding:40px; background:#f8f9fa;}}
-        h1 {{color:#333;}}
-        .up {{color:green; font-size:36px; font-weight:bold;}}
-        .down {{color:red; font-size:36px; font-weight:bold;}}
-    </style>
-    </head>
-    <body>
-    <h1>{TICKER} Next Day Prediction</h1>
-    <p>Date: {result['date']}</p>
-    <p>Direction: <span class="{result['direction'].lower()}">{result['direction']}</span></p>
-    <p>Confidence: {result['confidence']}</p>
-    <p>Last Close: ₹{result['last_price']}</p>
-    <p>Backtest Accuracy: {result['accuracy']}</p>
-    <p>Reason: {result['reason']}</p>
-    <p><small>Refresh karo latest ke liye</small></p>
-    </body>
-    </html>
-    """
-    return html
+    return "AI Trading Server is Online! 🚀 (Use Frontend to Scan)"
 
-@app.route('/api')
-def api():
-    return jsonify(get_prediction())
-
-def get_prediction():
+def get_prediction(ticker):
     try:
-        data = yf.download(TICKER, period=PERIOD, progress=False)
+        # Data download
+        data = yf.download(ticker, period=DEFAULT_PERIOD, progress=False)
+        
+        # Check: Data mila ya nahi?
         if data.empty:
-            return {"error": "Data nahi mila. Ticker check karo ya internet dekho."}
+            return {"error": "No Data found. Market Closed or Wrong Symbol."}
 
+        # Calculations
         data['Return'] = data['Close'].pct_change()
         data['Target'] = np.where(data['Return'].shift(-1) > 0, 1, 0)
         data['MA5'] = data['Close'].rolling(5).mean()
         data['MA20'] = data['Close'].rolling(20).mean()
-        data['RSI'] = 100 - (100 / (1 + (data['Close'].diff(1).clip(lower=0).rolling(14).mean() / 
-                                  -data['Close'].diff(1).clip(upper=0).rolling(14).mean())))
+        
+        # Simple RSI Calculation
+        delta = data['Close'].diff()
+        gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+        rs = gain / loss
+        data['RSI'] = 100 - (100 / (1 + rs))
+        
         data.dropna(inplace=True)
 
+        # Safety: Agar data kam pad gaya
         if len(data) < 30:
-            return {"error": "Data bahut kam hai."}
+            return {"error": "Not enough data for AI analysis."}
 
         features = ['MA5', 'MA20', 'RSI']
         X = data[features]
         y = data['Target']
 
+        # Training
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
         model = RandomForestClassifier(n_estimators=100, random_state=42)
         model.fit(X_train, y_train)
 
-        acc = accuracy_score(y_test, model.predict(X_test)) * 100
-
+        # Prediction for TOMORROW
         latest = data[features].iloc[-1:].values
         pred = model.predict(latest)[0]
         prob = model.predict_proba(latest)[0]
-        direction = "UP" if pred == 1 else "DOWN"
-        confidence = max(prob) * 100
-
-        importances = model.feature_importances_
-        top_idx = np.argmax(importances)
-        top_feature = features[top_idx]
+        
+        direction = "UP 🟢" if pred == 1 else "DOWN 🔴"
+        confidence = round(max(prob) * 100, 1)
+        
+        # Color & Logic
+        color = "#00e676" if pred == 1 else "#ff1744"
+        
+        # Agar AI confuse hai (50-55% chance), toh WAIT bolo
+        if confidence < 55:
+            direction = "WAIT ✋"
+            color = "#888"
+            reason = "AI Confused. Market Sideways hai."
+        else:
+            # Find strongest reason
+            importances = model.feature_importances_
+            top_idx = np.argmax(importances)
+            top_feature = features[top_idx]
+            rsi_val = round(data['RSI'].iloc[-1], 2)
+            reason = f"Strong signal from {top_feature} | RSI: {rsi_val}"
 
         last_price = float(data['Close'].iloc[-1])
-        today = datetime.date.today().strftime("%d %b %Y")
 
         return {
-            "date": today,
             "direction": direction,
-            "confidence": f"{confidence:.1f}%",
-            "last_price": f"{last_price:.2f}",
-            "accuracy": f"{acc:.2f}%",
-            "reason": f"Strong signal from {top_feature}"
+            "confidence": f"{confidence}%",
+            "price": f"{last_price:.2f}",
+            "reason": reason,
+            "color": color,
+            "rsi": round(data['RSI'].iloc[-1], 2)
         }
 
     except Exception as e:
         return {"error": str(e)}
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
+    
