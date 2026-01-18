@@ -1,6 +1,7 @@
-Flask
-yfinance
-pandas
-numpy
-scikit-learn
-gunicorn
+Flask==3.0.0
+Flask-Cors==4.0.0
+yfinance==0.2.36
+pandas==2.2.0
+numpy==1.26.3
+gunicorn==21.2.0
+scikit-learn==1.4.0
