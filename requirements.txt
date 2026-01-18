@@ -3,4 +3,4 @@ yfinance
 pandas
 numpy
 scikit-learn
-gunicorn   ← Yeh important hai Render ke liye (production server)
+gunicorn
