@@ -13,26 +13,40 @@ CORS(app)
 # --- CONFIG ---
 TRAINING_PERIOD = '2y' 
 
-# --- DATA FETCHING ---
+# --- DATA FETCHING (UPDATED FOR RELIABILITY) ---
 def get_data(ticker):
     try:
-        data = yf.download(ticker, period=TRAINING_PERIOD, progress=False)
+        # Ticker object use kar rahe hain jo zyada stable hai
+        stock = yf.Ticker(ticker)
+        
+        # History fetch karo
+        data = stock.history(period=TRAINING_PERIOD)
+        
+        # Agar data khali hai
         if data.empty:
-            return None, "No Data Found."
+            return None, "No Data Found. (Market Closed or Blocked)"
+        
+        # Reset Index taaki Date column ban jaye (Safe side)
+        data.reset_index(inplace=True)
+        
         return data, None
     except Exception as e:
         return None, str(e)
 
-# --- INDICATORS ---
+# --- MATHS & INDICATORS ---
 def add_features(df):
     df = df.copy()
+    
+    # Ensure 'Close' is numeric
+    df['Close'] = df['Close'].astype(float)
+    
     df['Return'] = df['Close'].pct_change()
     df['Target'] = np.where(df['Return'].shift(-1) > 0, 1, 0)
     
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
     
-    # RSI
+    # RSI Calculation
     delta = df['Close'].diff()
     gain = delta.where(delta > 0, 0).rolling(window=14).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
@@ -45,23 +59,27 @@ def add_features(df):
 
 # --- ML ENGINE ---
 def get_ml_prediction(ticker):
+    # 1. Get Data
     data, error = get_data(ticker)
     if error: return {"error": error}
     
     try:
+        # 2. Add Indicators
         data = add_features(data)
-        if len(data) < 30: return {"error": "Not enough data."}
+        
+        # Check: Data enough hai ya nahi?
+        if len(data) < 30: return {"error": "Not enough data points."}
 
         features = ['MA5', 'MA20', 'RSI', 'Momentum']
         X = data[features]
         y = data['Target']
 
-        # Train
+        # 3. Train Model
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
         model = RandomForestClassifier(n_estimators=100, min_samples_split=10, random_state=42)
         model.fit(X_train, y_train)
 
-        # Predict
+        # 4. Predict
         latest = data[features].iloc[-1:].values
         pred = model.predict(latest)[0]
         prob = model.predict_proba(latest)[0]
@@ -76,7 +94,7 @@ def get_ml_prediction(ticker):
         if confidence < 55:
             direction = "WAIT ✋"
             color = "#888"
-            reason = "Market Confusing. No clear signal."
+            reason = "Market Confusing. No clear trend."
         else:
             reason = f"AI Signal Strong ({confidence}%). RSI: {rsi}"
 
@@ -90,7 +108,7 @@ def get_ml_prediction(ticker):
             "rsi": rsi
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Logic Error: {str(e)}"}
 
 @app.route('/')
 def home():
@@ -100,6 +118,9 @@ def home():
 def scan():
     data = request.json
     symbol = data.get('symbol', 'BTC-USD')
+    # Symbol se spaces hata do (Safety check)
+    symbol = symbol.strip()
+    
     result = get_ml_prediction(symbol)
     if "error" in result:
         return jsonify({"success": False, "error": result['error']})
