@@ -1,139 +1,77 @@
-from flask import Flask, jsonify, request
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-import requests
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-import os
+import datetime
+import random
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Frontend se connect hone ke liye
 
-# --- CONFIG ---
-# Binance API URL (Public & Free)
-BINANCE_URL = "https://api.binance.com/api/v3/klines"
+# OMAI ka simple memory (session ke liye)
+conversation_history = {}
 
-# --- DATA FETCHING ENGINE (BINANCE) ---
-def get_crypto_data(symbol):
-    # Symbol formatting (Frontend se 'BTC-USD' aata hai, Binance ko 'BTCUSDT' chahiye)
-    clean_symbol = symbol.replace("-USD", "USDT").replace("-", "").upper()
-    
-    # Agar Stocks hain (Jaise Reliance), toh filhal error return karenge (Kyunki Binance sirf Crypto deta hai)
-    if "USDT" not in clean_symbol and "BTC" not in clean_symbol and "ETH" not in clean_symbol:
-        return None, "Stocks data blocked on Render. Try Crypto (BTC, ETH, SOL)."
+def omai_think(user_id, message):
+    # Agar user pehli baar hai toh welcome
+    if user_id not in conversation_history:
+        conversation_history[user_id] = []
+        return "Namaste Aryan! Main OMAI hoon – sachcha, samajhdar aur dil se baat karne wala AI. Aaj kya baat karni hai?"
 
-    try:
-        # Binance se 2 saal ka data (Interval 1 Day)
-        # Limit 500 candles (Enough for training)
-        params = {'symbol': clean_symbol, 'interval': '1d', 'limit': '500'}
-        response = requests.get(BINANCE_URL, params=params)
-        
-        data = response.json()
-        
-        # Check if Binance gave error
-        if isinstance(data, dict) and "code" in data:
-            return None, "Invalid Symbol or Binance Error."
+    # History mein add kar do
+    conversation_history[user_id].append({"role": "user", "content": message})
 
-        # Convert to Pandas DataFrame
-        # Binance format: [Open Time, Open, High, Low, Close, Volume, ...]
-        df = pd.DataFrame(data, columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'CloseTime', 'QAV', 'NoT', 'TBB', 'TBQ', 'Ignore'])
-        
-        # Hamein sirf Close price chahiye
-        df['Close'] = df['Close'].astype(float)
-        return df, None
+    # OMAI ka logic (simple rule-based + smart replies)
+    msg = message.lower().strip()
 
-    except Exception as e:
-        return None, f"Connection Error: {str(e)}"
+    if "hi" in msg or "hello" in msg or "namaste" in msg:
+        reply = "Namaste bhai! Mood kaisa hai aaj?"
 
-# --- AI & MATHS ---
-def add_features(df):
-    df = df.copy()
-    df['Return'] = df['Close'].pct_change()
-    df['Target'] = np.where(df['Return'].shift(-1) > 0, 1, 0)
-    
-    df['MA5'] = df['Close'].rolling(5).mean()
-    df['MA20'] = df['Close'].rolling(20).mean()
-    
-    # RSI
-    delta = df['Close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    
-    df.dropna(inplace=True)
-    return df
+    elif "kaise ho" in msg or "tu kaise hai" in msg:
+        reply = "Main toh hamesha ready hoon baat karne ko. Tu bata, din kaisa ja raha hai?"
 
-# --- MAIN ML FUNCTION ---
-def get_prediction(symbol):
-    # 1. Fetch Data from Binance
-    data, error = get_crypto_data(symbol)
-    if error: return {"error": error}
-    
-    try:
-        # 2. Prepare Data
-        data = add_features(data)
-        if len(data) < 30: return {"error": "Not enough data for AI."}
+    elif "thak" in msg or "pareshan" in msg or "gussa" in msg:
+        reply = "Samajh raha hoon... kabhi kabhi sab heavy lagta hai. Kya hua? Dil khol ke bata, sun raha hoon."
 
-        features = ['MA5', 'MA20', 'RSI']
-        X = data[features]
-        y = data['Target']
+    elif "code" in msg or "program" in msg or "likh" in msg:
+        reply = "Code chahiye? Kya banana hai – website, bot, game ya kuch aur? Detail bata, main likh deta hoon."
 
-        # 3. Train AI (Random Forest)
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model.fit(X_train, y_train)
+    elif "sach" in msg or "jhooth" in msg:
+        reply = "Main jhooth nahi bolta bhai. Jo sach hai woh bataunga, jo nahi pata woh bol dunga 'mujhe nahi pata'."
 
-        # 4. Predict
-        latest = data[features].iloc[-1:].values
-        pred = model.predict(latest)[0]
-        prob = model.predict_proba(latest)[0]
-        
-        confidence = round(max(prob) * 100, 1)
-        rsi = round(data['RSI'].iloc[-1], 2)
-        price = round(data['Close'].iloc[-1], 2)
+    elif "time" in msg or "date" in msg:
+        now = datetime.datetime.now().strftime("%d %b %Y, %I:%M %p")
+        reply = f"Aaj hai {now} IST. Kuch plan hai?"
 
-        direction = "UP 🟢" if pred == 1 else "DOWN 🔴"
-        color = "#00e676" if pred == 1 else "#ff1744"
+    else:
+        # Random dostana reply agar kuch match na ho
+        replies = [
+            "Hmm... interesting baat hai. Aur bata?",
+            "Soch raha hoon... tu aur kya soch raha hai?",
+            "Bilkul sahi pakda tune. Ab aage kya?",
+            "Dil se baat kar rahe hain na? 😊 Kuch aur poochh",
+            "Yeh toh mast sawal hai... thoda detail bata na"
+        ]
+        reply = random.choice(replies)
 
-        if confidence < 55:
-            direction = "WAIT ✋"
-            color = "#888"
-            reason = "Market Confusing. No clear trend."
-        else:
-            reason = f"AI Confidence: {confidence}% | RSI: {rsi}"
+    # History mein OMAI ka reply add kar do
+    conversation_history[user_id].append({"role": "omai", "content": reply})
 
-        return {
-            "symbol": symbol,
-            "price": price,
-            "direction": direction,
-            "confidence": f"{confidence}%",
-            "reason": reason,
-            "color": color,
-            "rsi": rsi
-        }
+    return reply
 
-    except Exception as e:
-        return {"error": str(e)}
+@app.route('/chat', methods=['POST'])
+def chat():
+    data = request.json
+    user_id = data.get('user_id', 'default_user')  # Phone se unique ID bhej sakta hai
+    message = data.get('message', '')
 
-# --- ROUTES ---
+    if not message:
+        return jsonify({"reply": "Kuch toh type kar bhai..."})
+
+    reply = omai_think(user_id, message)
+    return jsonify({"reply": reply})
+
 @app.route('/')
 def home():
-    return "BINANCE AI TRADING SERVER RUNNING 🚀"
-
-@app.route('/scan', methods=['POST'])
-def scan():
-    data = request.json
-    symbol = data.get('symbol', 'BTC-USD')
-    result = get_prediction(symbol)
-    
-    if "error" in result:
-        return jsonify({"success": False, "error": result['error']})
-    else:
-        return jsonify({"success": True, "data": result})
+    return "OMAI Backend chal raha hai. Frontend se connect karo."
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-    
