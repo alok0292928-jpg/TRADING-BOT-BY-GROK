@@ -6,52 +6,59 @@ import random
 app = Flask(__name__)
 CORS(app)  # Frontend se connect hone ke liye
 
-# OMAI ka simple memory (session ke liye)
+# OMAI ka memory – har user ke messages yaad rakhega
 conversation_history = {}
 
-def omai_think(user_id, message):
-    # Agar user pehli baar hai toh welcome
+def omai_brain(user_id, message):
+    # Pehli baar baat kar raha hai toh welcome
     if user_id not in conversation_history:
         conversation_history[user_id] = []
-        return "Namaste Aryan! Main OMAI hoon – sachcha, samajhdar aur dil se baat karne wala AI. Aaj kya baat karni hai?"
+        return "Namaste Aryan! Main OMAI hoon – sach bolta hoon, baat dil se samajhta hoon. Aaj kya baat karni hai bhai?"
 
-    # History mein add kar do
+    # User ka message history mein daal do
     conversation_history[user_id].append({"role": "user", "content": message})
 
-    # OMAI ka logic (simple rule-based + smart replies)
+    # Last 5 messages yaad rakh ke context samajh
+    recent = conversation_history[user_id][-5:]
+    context = " ".join([m["content"] for m in recent if m["role"] == "user"])
+
     msg = message.lower().strip()
 
-    if "hi" in msg or "hello" in msg or "namaste" in msg:
-        reply = "Namaste bhai! Mood kaisa hai aaj?"
+    # Context ke hisaab se smart reply
+    if any(word in context for word in ["thak", "pareshan", "gussa", "stress"]):
+        reply = "Lag raha hai aaj din thoda heavy raha. Kya hua exactly? Dil khol ke bata, main sun raha hoon – koi judgement nahi."
 
-    elif "kaise ho" in msg or "tu kaise hai" in msg:
-        reply = "Main toh hamesha ready hoon baat karne ko. Tu bata, din kaisa ja raha hai?"
+    elif "kaise ho" in msg or "tu kaise" in msg:
+        reply = "Main toh hamesha fresh hoon baat karne ko. Tu bata, tere taraf kya chal raha hai aaj?"
 
-    elif "thak" in msg or "pareshan" in msg or "gussa" in msg:
-        reply = "Samajh raha hoon... kabhi kabhi sab heavy lagta hai. Kya hua? Dil khol ke bata, sun raha hoon."
+    elif "code" in msg or "likh" in msg or "program" in msg:
+        reply = "Code chahiye? Kya banana hai – website, bot, game, trading tool ya kuch aur? Detail bata, main likh deta hoon."
 
-    elif "code" in msg or "program" in msg or "likh" in msg:
-        reply = "Code chahiye? Kya banana hai – website, bot, game ya kuch aur? Detail bata, main likh deta hoon."
-
-    elif "sach" in msg or "jhooth" in msg:
-        reply = "Main jhooth nahi bolta bhai. Jo sach hai woh bataunga, jo nahi pata woh bol dunga 'mujhe nahi pata'."
+    elif "sach" in msg or "jhooth" in msg or "sahi" in msg:
+        reply = "Main jhooth se door rehta hoon bhai. Jo sach hai woh bataunga, jo nahi pata woh seedha bol dunga 'mujhe nahi pata'."
 
     elif "time" in msg or "date" in msg:
-        now = datetime.datetime.now().strftime("%d %b %Y, %I:%M %p")
-        reply = f"Aaj hai {now} IST. Kuch plan hai?"
+        now = datetime.datetime.now().strftime("%d %b %Y, %I:%M %p IST")
+        reply = f"Aaj hai {now}. Kuch special plan hai?"
 
     else:
-        # Random dostana reply agar kuch match na ho
-        replies = [
-            "Hmm... interesting baat hai. Aur bata?",
-            "Soch raha hoon... tu aur kya soch raha hai?",
-            "Bilkul sahi pakda tune. Ab aage kya?",
-            "Dil se baat kar rahe hain na? 😊 Kuch aur poochh",
-            "Yeh toh mast sawal hai... thoda detail bata na"
-        ]
-        reply = random.choice(replies)
+        # Context se related reply
+        if "trading" in context or "backend" in context:
+            reply = "Trading ya backend ki baat chal rahi thi na? Abhi bhi pareshani hai usme ya kuch naya soch raha hai?"
+        elif "mood" in context or "din" in context:
+            reply = "Mood ke baare mein baat ki thi... abhi kaisa feel ho raha hai?"
+        else:
+            # General dostana reply
+            replies = [
+                "Hmm... yeh baat dilchasp hai. Aur bata kya chal raha hai?",
+                "Soch raha hoon... tu kya soch raha hai ispe?",
+                "Bilkul sahi pakda tune. Ab aage kya plan hai?",
+                "Dil se baat ho rahi hai na... kuch aur share karna hai?",
+                "Mast baat hai bhai. Aur kya chal raha hai zindagi mein?"
+            ]
+            reply = random.choice(replies)
 
-    # History mein OMAI ka reply add kar do
+    # OMAI ka reply history mein save kar do
     conversation_history[user_id].append({"role": "omai", "content": reply})
 
     return reply
@@ -59,13 +66,13 @@ def omai_think(user_id, message):
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
-    user_id = data.get('user_id', 'default_user')  # Phone se unique ID bhej sakta hai
-    message = data.get('message', '')
+    user_id = data.get('user_id', 'default')
+    message = data.get('message', '').strip()
 
     if not message:
         return jsonify({"reply": "Kuch toh type kar bhai..."})
 
-    reply = omai_think(user_id, message)
+    reply = omai_brain(user_id, message)
     return jsonify({"reply": reply})
 
 @app.route('/')
